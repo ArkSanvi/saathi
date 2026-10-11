@@ -18,6 +18,8 @@ It's built entirely on **Sarvam AI**.
 - 📷 **Prescription to schedule:** upload a photo of the prescription. Sarvam Vision extracts each medicine, its strength, and its 1-0-1 timing.
 - 💊 **Today's doses:** taken, missed or pending, with the reason for a miss ("forgot", "ran out").
 - 🚨 **Alerts:** 🟡 for a missed dose, 🔴 for red flags (dizziness, chest pain, a fall, confusion, ran out of medicine), each with the senior's exact words.
+- 💌 **Message via Saathi:** the family types a message in any language ("Maa, I'll visit on Sunday"), and Saathi delivers it lovingly, in the senior's language, on the next call.
+- 🛡️ **Scam protection:** if the senior mentions someone asking for an OTP, PIN or KYC details, Saathi warns them never to share it and sends a red "Possible scam" alert.
 - 📞 **Call log:** the full transcript in the original language with an English translation, plus an AI summary and mood.
 
 `/` shows both screens side by side for demos.
@@ -30,7 +32,8 @@ It's built entirely on **Sarvam AI**.
 | Reply, dose updates and alerts as JSON in one call | Chat Completions | `sarvam-105b` |
 | Saathi speaks the reply | Text-to-Speech | `bulbul:v3` |
 | Prescription photo to structured medicine list | Document AI (Extract) | Sarvam Vision |
-| English translations and call summary for the family | Chat Completions | `sarvam-105b` |
+| English translations of every turn for the family | Translate | `sarvam-translate:v1` (`mayura:v1` with auto-detect as fallback) |
+| Call summary and mood for the family | Chat Completions | `sarvam-105b` |
 
 ```
  mic (16 kHz WAV, voice-activity detected) ─▶ Saaras STT ─▶ Sarvam-105B ─▶ Bulbul TTS ─▶ speaker

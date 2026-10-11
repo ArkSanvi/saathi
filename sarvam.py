@@ -66,6 +66,27 @@ async def chat(messages: list[dict], json_mode: bool = False, max_tokens: int = 
     return (data["choices"][0]["message"].get("content") or "").strip()
 
 
+async def chat_stream(messages: list[dict], max_tokens: int = 1024, temperature: float = 0.3):
+    """Yield reply text deltas as the model generates them (server-sent events)."""
+    body = {"model": "sarvam-105b", "messages": messages, "temperature": temperature,
+            "max_tokens": max_tokens, "reasoning_effort": None, "stream": True}
+    async with _client.stream("POST", f"{BASE}/v1/chat/completions", headers=HEADERS, json=body) as resp:
+        if resp.status_code >= 400:
+            await resp.aread()
+            raise SarvamError(f"chat stream -> {resp.status_code}: {resp.text[:500]}")
+        async for line in resp.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            chunk = json.loads(data)
+            if chunk.get("choices"):
+                delta = chunk["choices"][0].get("delta", {}).get("content")
+                if delta:
+                    yield delta
+
+
 def parse_json(text: str) -> dict:
     """Parse model output as JSON, tolerating code fences or stray prose."""
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
@@ -96,6 +117,24 @@ async def text_to_speech(text: str, language_code: str) -> str | None:
     )
     data = _check(resp)
     return data["audios"][0]
+
+
+TRANSLATE_LANGS = TTS_LANGS | {"as-IN", "brx-IN", "doi-IN", "kok-IN", "ks-IN", "mai-IN", "mni-IN", "ne-IN",
+                                "sa-IN", "sat-IN", "sd-IN", "ur-IN"}
+
+
+async def translate(text: str, source: str, target: str = "en-IN") -> str:
+    """Translate with sarvam-translate:v1; fall back to mayura:v1 with auto-detection for unknown sources."""
+    if source == target:
+        return text
+    if source in TRANSLATE_LANGS:
+        body = {"input": text[:2000], "source_language_code": source, "target_language_code": target,
+                "model": "sarvam-translate:v1"}
+    else:
+        body = {"input": text[:1000], "source_language_code": "auto", "target_language_code": target,
+                "model": "mayura:v1"}
+    resp = await _client.post(f"{BASE}/translate", headers=HEADERS, json=body)
+    return _check(resp)["translated_text"]
 
 
 PRESCRIPTION_SCHEMA = {

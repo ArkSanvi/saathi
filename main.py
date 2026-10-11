@@ -1,12 +1,13 @@
 """Saathi — an elder companion that checks in on medicines, in any Indian language."""
 import asyncio
 import json
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -46,6 +47,7 @@ def fresh_state() -> dict:
         "ring": None,
         "rung_doses": [],
         "prescription": None,
+        "messages": [],
     }
     rebuild_doses(s)
     return s
@@ -134,6 +136,7 @@ LANGUAGE RULES (very important)
 SAFETY
 - You are not a doctor. Never diagnose or recommend medicines.
 - RED FLAGS -> alert level "red" (ALWAYS red, never yellow): chest pain, breathlessness, fainting, dizziness / chakkar, a fall, confusion, slurred speech, bleeding, severe side effects, ran out of medicine, not eating for a day, very low mood or hopelessness.
+- SCAMS -> alert level "red": if they mention a call/message asking for an OTP, bank or ATM PIN, Aadhaar/PAN details, KYC update, a prize, or money transfer, firmly but kindly tell them NEVER to share OTP/PIN with anyone, not even "bank officers", to hang up on such callers, and that you are telling {family_name}. Start the alert message with "Possible scam:".
 - For a red flag, stay calm, tell them you are informing {family_name} right away; for chest pain, breathlessness, a fall or fainting, also tell them to call 112 or a neighbour now.
 - A missed dose with no worrying reason -> alert level "yellow".
 
@@ -141,22 +144,32 @@ CURRENT TIME: {time}
 TODAY'S DOSES (id | medicine | time | status):
 {doses}
 
-OUTPUT: respond with ONLY a JSON object:
-{{
-  "reply": "what you say next, in the person's language and native script",
-  "reply_language_code": "BCP-47 code of your reply, e.g. hi-IN, ta-IN, en-IN",
-  "dose_updates": [{{"dose_id": "<id from list>", "status": "taken" | "missed", "reason": "short English reason if missed"}}],
+OUTPUT: write ONLY the words you say aloud — no JSON, no labels, no quotes, no stage directions."""
+
+
+ANALYSIS_PROMPT = """You track an elderly person's medicines from a check-in call made by Saathi, an AI companion.
+TODAY'S DOSES (id | medicine | time | status):
+{doses}
+
+Read the conversation, especially the person's LATEST message and Saathi's reply to it, and output ONLY a JSON object:
+{{"dose_updates": [{{"dose_id": "<id from the list>", "status": "taken" | "missed", "reason": "short English reason if missed"}}],
   "alert": null or {{"level": "yellow" | "red", "message": "one-line English note for the family"}},
-  "end_call": false
-}}
-Only include dose_updates when the person clearly said they took or did not take a specific dose.
-Only set "alert" when this message reveals something NEW; don't repeat an alert you already raised earlier in the call."""
+  "end_call": true or false}}
+
+Rules:
+- dose_updates: only doses the person clearly said they took or did not take. Saying they will take it now is NOT taken yet.
+- alert "red" (always red): chest pain, breathlessness, fainting, dizziness/chakkar, a fall, confusion, slurred speech, bleeding,
+  severe side effects, ran out of medicine, not eating for a day, hopelessness, or a possible scam (someone asking for OTP/PIN/bank/KYC
+  details or money — start the message with "Possible scam:").
+- alert "yellow": a missed dose with no worrying reason.
+- alert null if this latest message reveals nothing new.
+- end_call: true only if Saathi's reply is a goodbye that ends the call."""
 
 
 def build_system_prompt(lang: str | None) -> str:
     p = state["profile"]
     if lang:
-        lang_hint = f"Speech recognition detected: {LANG_NAMES.get(lang, lang)} ({lang})."
+        lang_hint = f"Their latest message is in {LANG_NAMES.get(lang, lang)} ({lang}), so reply in {LANG_NAMES.get(lang, lang)}."
     else:
         lang_hint = "They typed it, so detect the language from the text itself."
     doses = "\n".join(
@@ -176,40 +189,135 @@ def find_call(call_id: str) -> dict:
     raise HTTPException(404, "call not found")
 
 
-async def agent_turn(call: dict, user_text: str | None, lang: str | None) -> dict:
-    """One LLM step: produce Saathi's reply plus structured dose / alert updates.
-
-    `lang` is the STT-detected language, or None for typed input.
-    """
-    fallback_lang = lang or call["language"]
+def build_messages(call: dict, user_text: str | None, lang: str | None) -> list[dict]:
     messages = [{"role": "system", "content": build_system_prompt(lang)}]
     for t in call["turns"]:
         messages.append({"role": "assistant" if t["role"] == "saathi" else "user", "content": t["text"]})
     if user_text is None:
         due = ", ".join(f"{d['name']} ({d['time']})" for d in call["due"]) or "today's medicines"
-        messages.append({"role": "user", "content": f"[The call just connected. Greet them warmly by name and ask about: {due}.]"})
+        note = ""
+        if call.get("family_messages"):
+            fam = state["profile"]["family_name"]
+            msgs = " / ".join(m["text"] for m in call["family_messages"])
+            note = (f" First, lovingly pass on this message from {fam}, translated naturally into their language "
+                    f"(say it is from {fam}): \"{msgs}\". Then")
+        messages.append({"role": "user", "content": f"[The call just connected. Greet them warmly by name.{note} ask about: {due}.]"})
     else:
-        messages.append({"role": "user", "content": user_text})
+        content = user_text
+        if lang:  # recency matters: put the language instruction right next to what they said
+            name = LANG_NAMES.get(lang, lang)
+            content += f"\n\n[Reply in {name}, written in {name} script.]"
+        messages.append({"role": "user", "content": content})
+    return messages
 
-    out = {}
-    for _ in range(2):  # the model occasionally returns an empty completion; retry once
-        raw = await sarvam.chat(messages, json_mode=True)
-        try:
-            out = sarvam.parse_json(raw)
-        except Exception:
-            out = {"reply": raw}
-        if (out.get("reply") or "").strip():
+
+# Unicode blocks -> language, so each spoken sentence goes to Bulbul with the right language code.
+SCRIPTS = [(0x0900, 0x097F, "hi-IN"), (0x0980, 0x09FF, "bn-IN"), (0x0A00, 0x0A7F, "pa-IN"), (0x0A80, 0x0AFF, "gu-IN"),
+           (0x0B00, 0x0B7F, "od-IN"), (0x0B80, 0x0BFF, "ta-IN"), (0x0C00, 0x0C7F, "te-IN"), (0x0C80, 0x0CFF, "kn-IN"),
+           (0x0D00, 0x0D7F, "ml-IN")]
+
+
+def script_lang(text: str, hint: str) -> str:
+    counts: dict[str, int] = {}
+    for ch in text:
+        o = ord(ch)
+        for lo, hi, code in SCRIPTS:
+            if lo <= o <= hi:
+                counts[code] = counts.get(code, 0) + 1
+    if not counts:
+        return "en-IN" if any(c.isascii() and c.isalpha() for c in text) else hint
+    best = max(counts, key=counts.get)
+    if best == "hi-IN" and hint in {"mr-IN", "ne-IN"}:  # Devanagari is shared
+        return hint
+    return best
+
+
+SENTENCE_END = re.compile(r"[।॥.!?]+[\"'”’)]*\s+")
+FALLBACK_REPLY = "माफ़ कीजिए, एक बार फिर से बताइए?"
+
+
+def dose_table() -> str:
+    return "\n".join(
+        f"{d['id']} | {d['name']} {d['strength']} ({d['purpose'] or 'medicine'}, {d['food'] or 'any time'}) | {d['time']} | {d['status']}"
+        for d in state["doses"]
+    ) or "(no medicines scheduled)"
+
+
+async def analyse_turn(call: dict, user_text: str, reply: str) -> dict:
+    """Structured side of a turn: dose updates, alert, end of call. Runs while the reply is being spoken."""
+    convo = "\n".join(f"{'Saathi' if t['role'] == 'saathi' else 'Person'}: {t['text']}" for t in call["turns"][-8:])
+    convo += f"\nPerson (LATEST): {user_text}\nSaathi (reply): {reply}"
+    try:
+        raw = await sarvam.chat([{"role": "system", "content": ANALYSIS_PROMPT.format(doses=dose_table())},
+                                 {"role": "user", "content": convo}], json_mode=True, max_tokens=400, temperature=0.1)
+        return sarvam.parse_json(raw)
+    except Exception as e:
+        print("analysis failed:", repr(e))
+        return {}
+
+
+async def stream_agent(call: dict, user_text: str | None, lang: str | None, out_q: asyncio.Queue) -> None:
+    """Stream Saathi's reply. Puts ("sentence", text, lang) on out_q as soon as each sentence is complete,
+    then ("meta", reply, reply_lang, meta). `lang` is the STT language, or None for typed input."""
+    messages = build_messages(call, user_text, lang)
+    hint = lang or call["language"]
+    reply = ""
+    for attempt in range(2):  # the model occasionally returns nothing; retry once
+        reply, emitted = "", 0
+        async for delta in sarvam.chat_stream(messages, max_tokens=400):
+            reply += delta
+            # Emit each complete sentence, merging very short ones so the speech isn't choppy.
+            while (m := SENTENCE_END.search(reply, emitted)):
+                chunk = reply[emitted:m.end()].strip()
+                if len(chunk) < 12:
+                    nxt = SENTENCE_END.search(reply, m.end())
+                    if not nxt:
+                        break
+                    m, chunk = nxt, reply[emitted:nxt.end()].strip()
+                emitted = m.end()
+                await out_q.put(("sentence", chunk, script_lang(chunk, hint)))
+        tail = reply[emitted:].strip()
+        if tail:
+            await out_q.put(("sentence", tail, script_lang(tail, hint)))
+        if reply.strip():
             break
-        print("Empty LLM reply, retrying. Raw:", raw[:300])
-    if not (out.get("reply") or "").strip():
-        out["reply"] = "माफ़ कीजिए, एक बार फिर से बताइए?"
-        out["reply_language_code"] = "hi-IN"
-    out["reply_language_code"] = norm_lang(out.get("reply_language_code"), fallback_lang)
-    return out
+        print(f"Empty LLM reply (attempt {attempt + 1})")
+    reply = reply.strip()
+    if not reply:
+        reply = FALLBACK_REPLY
+        await out_q.put(("sentence", reply, "hi-IN"))
+    reply_lang = script_lang(reply, hint)
+    meta = await analyse_turn(call, user_text, reply) if user_text is not None else {}
+    await out_q.put(("meta", reply, reply_lang, meta))
+
+
+async def speak_stream(call: dict, user_text: str | None, lang: str | None):
+    """Run the agent and TTS concurrently; yield ("audio", text, b64) in order, then ("meta", ...)."""
+    q: asyncio.Queue = asyncio.Queue()
+    producer = asyncio.create_task(stream_agent(call, user_text, lang, q))
+    tts_tasks: list[tuple[str, asyncio.Task]] = []
+    meta = None
+    try:
+        while meta is None:
+            item = await q.get()
+            if item[0] == "sentence":
+                _, text, l = item
+                tts_tasks.append((text, asyncio.create_task(speak(text, l))))
+            else:
+                meta = item
+            # Yield finished audio in order without waiting for the whole reply.
+            while tts_tasks and tts_tasks[0][1].done():
+                text, task = tts_tasks.pop(0)
+                yield ("audio", text, task.result())
+        for text, task in tts_tasks:
+            yield ("audio", text, await task)
+        yield meta
+    finally:
+        await producer
 
 
 RED_FLAG_WORDS = ("dizz", "chest", "breath", "faint", "fall", "fell", "confus", "slurred", "bleed",
-                  "ran out", "run out", "not eaten", "hopeless", "unconscious", "vomit")
+                  "ran out", "run out", "not eaten", "hopeless", "unconscious", "vomit", "scam", "otp", "fraud")
 
 
 def apply_updates(call: dict, out: dict, user_text: str) -> None:
@@ -303,34 +411,57 @@ def stt_keyterms() -> list[str]:
     return [t for t in dict.fromkeys(terms) if t]
 
 
-TRANSLATE_PROMPT = """Translate each numbered line into simple English. Reply with ONLY a JSON object mapping the number to its translation, e.g. {"1": "...", "2": "..."}."""
-
-
 async def translate_turns(call: dict, turns: list[dict]) -> None:
-    """Fill in English translations for the family dashboard, off the hot path."""
+    """Fill in English translations for the family dashboard (Sarvam Translate), off the hot path."""
     todo = [t for t in turns if t["text"] and not t.get("en")]
     if not todo:
         return
-    if all(t["lang"] == "en-IN" for t in todo):
-        for t in todo:
-            t["en"] = t["text"]
-        return
-    lines = "\n".join(f"{i + 1}. {t['text']}" for i, t in enumerate(todo))
-    try:
-        raw = await sarvam.chat([{"role": "system", "content": TRANSLATE_PROMPT}, {"role": "user", "content": lines}],
-                                json_mode=True, max_tokens=600, temperature=0.1)
-        out = sarvam.parse_json(raw)
-        for i, t in enumerate(todo):
-            t["en"] = out.get(str(i + 1), "")
-    except Exception as e:
-        print("translation failed:", e)
-        return
+
+    async def one(t: dict) -> None:
+        try:
+            t["en"] = await sarvam.translate(t["text"], t["lang"], "en-IN")
+        except Exception as e:
+            print("translation failed:", e)
+
+    await asyncio.gather(*(one(t) for t in todo))
     async with lock:
         save(state)
 
 
 AUDIO_DIR = DATA / "audio"
 AUDIO_DIR.mkdir(exist_ok=True)
+
+
+def ndjson(obj: dict) -> str:
+    return json.dumps(obj, ensure_ascii=False) + "\n"
+
+
+async def respond(call: dict, user_text: str | None, lang: str | None, stt: dict | None):
+    """Stream one Saathi turn to the browser, then record it and apply dose / alert updates."""
+    try:
+        reply, reply_lang, meta = "", call["language"], {}
+        async for ev in speak_stream(call, user_text, lang):
+            if ev[0] == "audio":
+                yield ndjson({"type": "audio", "text": ev[1], "audio": ev[2]})
+            else:
+                _, reply, reply_lang, meta = ev
+        async with lock:
+            ts = now().isoformat(timespec="seconds")
+            new_turns = []
+            if user_text is not None:
+                new_turns.append({"role": "senior", "text": user_text, "en": "", "lang": lang or reply_lang, "ts": ts,
+                                  "via": "voice" if stt else "text", "lang_confidence": stt and stt["language_probability"]})
+            new_turns.append({"role": "saathi", "text": reply, "en": "", "lang": reply_lang, "ts": ts})
+            call["turns"] += new_turns
+            call["language"] = reply_lang
+            if user_text is not None:
+                apply_updates(call, meta, user_text)
+            save(state)
+        asyncio.create_task(translate_turns(call, new_turns))
+        yield ndjson({"type": "done", "reply": reply, "lang": reply_lang, "end_call": bool(meta.get("end_call"))})
+    except Exception as e:
+        print("turn failed:", repr(e))
+        yield ndjson({"type": "error", "message": str(e)[:200]})
 
 
 @app.post("/api/call/start")
@@ -341,22 +472,23 @@ async def start_call():
         for c in state["calls"]:  # a new call ends any call left open (e.g. page reload)
             if c["status"] == "live":
                 c["status"], c["ended"] = "ended", now().isoformat(timespec="seconds")
-        lang = state["profile"]["language"]
         call = {
             "id": uuid.uuid4().hex[:8], "started": now().isoformat(timespec="seconds"), "ended": None,
-            "language": lang, "turns": [], "summary": "", "status": "live",
+            "language": state["profile"]["language"], "turns": [], "summary": "", "status": "live",
             "due": [d for d in state["doses"] if d["id"] in ring["dose_ids"]],
+            "family_messages": [m for m in state.setdefault("messages", []) if not m["delivered"]],
         }
+        for m in call["family_messages"]:
+            m["delivered"], m["call_id"] = True, call["id"]
         state["calls"].insert(0, call)
-        out = await agent_turn(call, None, lang)
-        reply_lang = out["reply_language_code"]
-        turn = {"role": "saathi", "text": out.get("reply", ""), "en": "", "lang": reply_lang,
-                "ts": now().isoformat(timespec="seconds")}
-        call["turns"].append(turn)
         save(state)
-    asyncio.create_task(translate_turns(call, [turn]))
-    audio = await speak(out.get("reply", ""), reply_lang)
-    return {"call_id": call["id"], "reply": out.get("reply", ""), "lang": reply_lang, "audio": audio, "end_call": False}
+
+    async def gen():
+        yield ndjson({"type": "call", "call_id": call["id"]})
+        async for line in respond(call, None, call["language"], None):
+            yield line
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
 
 
 @app.post("/api/call/{call_id}/turn")
@@ -369,7 +501,7 @@ async def call_turn(call_id: str, audio: UploadFile | None = File(None), text: s
     if audio is not None:
         blob = await audio.read()
         if len(blob) < 8000:  # < ~0.25s of 16 kHz audio: a click or cough
-            return {"heard": "", "reply": "", "audio": None, "retry": True}
+            return StreamingResponse(iter([ndjson({"type": "retry"})]), media_type="application/x-ndjson")
         fname, ctype = audio.filename or "turn.wav", audio.content_type or "audio/wav"
         (AUDIO_DIR / f"{call_id}_{len(call['turns']):02d}{Path(fname).suffix or '.wav'}").write_bytes(blob)
         keyterms = stt_keyterms()
@@ -385,31 +517,18 @@ async def call_turn(call_id: str, audio: UploadFile | None = File(None), text: s
         print(f"STT [{lang} p={conf:.2f}]: {user_text}")
     elif text and text.strip():
         user_text = text.strip()
-        lang = None  # the model detects typed language and reports it back
+        lang = script_lang(user_text, call["language"])  # typed: infer language from the script
     else:
         raise HTTPException(400, "send audio or text")
     if not user_text:
-        return {"heard": "", "reply": "", "audio": None, "retry": True}
+        return StreamingResponse(iter([ndjson({"type": "retry"})]), media_type="application/x-ndjson")
 
-    async with lock:
-        out = await agent_turn(call, user_text, lang)
-        reply_lang = out["reply_language_code"]
-        call["language"] = reply_lang
-        lang = lang or reply_lang
-        ts = now().isoformat(timespec="seconds")
-        new_turns = [
-            {"role": "senior", "text": user_text, "en": "", "lang": lang, "ts": ts, "via": "voice" if stt else "text",
-             "lang_confidence": stt and stt["language_probability"]},
-            {"role": "saathi", "text": out.get("reply", ""), "en": "", "lang": reply_lang, "ts": ts},
-        ]
-        call["turns"] += new_turns
-        apply_updates(call, out, user_text)
-        save(state)
+    async def gen():
+        yield ndjson({"type": "heard", "text": user_text, "lang": lang})
+        async for line in respond(call, user_text, lang, stt):
+            yield line
 
-    asyncio.create_task(translate_turns(call, new_turns))
-    audio_b64 = await speak(out.get("reply", ""), reply_lang)
-    return {"heard": user_text, "heard_lang": lang, "reply": out.get("reply", ""), "lang": reply_lang,
-            "audio": audio_b64, "end_call": bool(out.get("end_call"))}
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
 
 
 SUMMARY_PROMPT = """Summarise this check-in call between Saathi (an AI companion) and an elderly person for their family.
@@ -502,6 +621,24 @@ async def upload_prescription(file: UploadFile = File(...)):
     (DATA / f"rx_{res['job_id']}.json").write_text(json.dumps(res["raw"], ensure_ascii=False, indent=2))
     return {"medicines": meds, "patient": data.get("patient_name", ""), "doctor": data.get("doctor_name", ""),
             "found": bool(res["data"])}
+
+
+class FamilyMessage(BaseModel):
+    text: str
+
+
+@app.post("/api/message")
+async def send_message(msg: FamilyMessage):
+    """Family leaves a message; Saathi delivers it, in the senior's language, at the start of the next call."""
+    if not msg.text.strip():
+        raise HTTPException(400, "empty message")
+    async with lock:
+        state.setdefault("messages", []).insert(0, {
+            "id": uuid.uuid4().hex[:8], "text": msg.text.strip()[:500], "ts": now().isoformat(timespec="seconds"),
+            "delivered": False, "call_id": None,
+        })
+        save(state)
+    return {"ok": True}
 
 
 @app.post("/api/ack/{alert_id}")

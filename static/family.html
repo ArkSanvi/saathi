@@ -79,6 +79,17 @@
   <div class="grid">
     <div>
       <div class="card"><h2>🚨 Alerts <span class="count muted" id="alertCount"></span></h2><div id="alerts"></div></div>
+      <div class="card">
+        <h2>💌 Message via Saathi</h2>
+        <p class="muted" style="margin:0 0 10px;font-size:13px">Type in any language. Saathi says it in their language on the next call.</p>
+        <form id="msgForm" style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="msgIn" placeholder="e.g. Maa, I'll visit this Sunday. Love you!" autocomplete="off"
+                 style="flex:1;min-width:180px;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--bg)">
+          <button class="btn" type="submit">Send</button>
+          <button class="btn primary" type="button" id="msgCallBtn">Send &amp; call now</button>
+        </form>
+        <div id="msgs" style="margin-top:10px"></div>
+      </div>
       <div class="card"><h2>💊 Today's doses</h2><div id="doses"></div></div>
       <div class="card">
         <h2>⚙️ Profile</h2>
@@ -165,6 +176,10 @@ function render(s) {
       <span class="pill ${d.status}">${d.status}</span>
     </div>`).join("") : `<div class="empty">No medicines yet — upload a prescription.</div>`;
 
+  $("msgs").innerHTML = (s.messages || []).slice(0, 5).map(m => `
+    <div class="dose"><div class="n">${esc(m.text)}</div>
+      <span class="pill ${m.delivered ? "taken" : "pending"}">${m.delivered ? "✓ delivered" : "⏳ next call"}</span></div>`).join("");
+
   if (!medsDirty) renderMeds(s.medicines);
   if (s.prescription) $("rxInfo").textContent = [s.prescription.doctor && `Dr: ${s.prescription.doctor}`, `read ${fmtTime(s.prescription.at)}`].filter(Boolean).join(" · ");
 
@@ -242,6 +257,17 @@ $("profileForm").onsubmit = async (e) => {
   await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   refresh();
 };
+
+async function sendMsg(callNow) {
+  const text = $("msgIn").value.trim();
+  if (!text) return;
+  await fetch("/api/message", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+  $("msgIn").value = "";
+  if (callNow) await fetch("/api/trigger-call", { method: "POST" });
+  refresh();
+}
+$("msgForm").onsubmit = (e) => { e.preventDefault(); sendMsg(false); };
+$("msgCallBtn").onclick = () => sendMsg(true);
 
 async function ack(id) { await fetch(`/api/ack/${id}`, { method: "POST" }); refresh(); }
 $("triggerBtn").onclick = async () => {
