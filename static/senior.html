@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saathi</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  body { min-height: 100vh; display: flex; justify-content: center; }
+  .phone { width: 100%; max-width: 440px; min-height: 100vh; display: flex; flex-direction: column; position: relative; }
+  .screen { display: none; flex: 1; flex-direction: column; padding: 20px 16px; }
+  .screen.on { display: flex; }
+
+  .center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 16px; }
+  .avatar { width: 120px; height: 120px; border-radius: 50%; background: var(--accent-soft); display: grid; place-items: center; font-size: 60px; position: relative; }
+  .clock { font-size: 64px; font-weight: 700; letter-spacing: -1px; }
+  .big-btn { font-size: 24px; font-weight: 700; padding: 20px 36px; border-radius: 999px; background: var(--accent); color: #fff; box-shadow: var(--shadow); }
+  .soft-btn { font-size: 18px; padding: 14px 24px; border-radius: 999px; background: var(--surface-2); color: var(--text); }
+
+  /* ---- call screens use a dark "phone app" look in both themes */
+  .dark { background: radial-gradient(120% 80% at 50% 0%, #4a2a17 0%, #1b1310 55%, #120d0a 100%); color: #fff; }
+  .dark .muted { color: rgba(255,255,255,.65); }
+  .dark .avatar { background: rgba(255,255,255,.1); }
+  .call-top { text-align: center; padding-top: 28px; }
+  .call-top .name { font-size: 34px; font-weight: 700; margin: 14px 0 4px; }
+  .call-top .sub { font-size: 18px; font-variant-numeric: tabular-nums; }
+  .pulse { animation: pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(240,138,70,.55);} 50% { box-shadow: 0 0 0 26px rgba(240,138,70,0);} }
+  .call-actions { display: flex; justify-content: space-around; padding: 30px 0 40px; }
+  .round { width: 80px; height: 80px; border-radius: 50%; font-size: 32px; color: #fff; display: grid; place-items: center; margin: 0 auto; }
+  .round.green { background: #22c55e; } .round.red { background: #ef4444; }
+  .round.ghost { background: rgba(255,255,255,.14); width: 72px; height: 72px; font-size: 28px; }
+  .round.ghost.on { background: #fff; color: #1b1310; }
+  .round-label { text-align: center; margin-top: 8px; font-size: 15px; color: rgba(255,255,255,.8); }
+
+  /* in-call avatar reacts to who is talking */
+  .avatar.speaking::before, .avatar.speaking::after { content: ""; position: absolute; inset: -10px; border-radius: 50%; border: 3px solid rgba(240,138,70,.7); animation: ripple 1.4s infinite; }
+  .avatar.speaking::after { animation-delay: .7s; }
+  @keyframes ripple { from { transform: scale(1); opacity: 1; } to { transform: scale(1.45); opacity: 0; } }
+  .avatar.thinking { animation: breathe 1.4s ease-in-out infinite; }
+  @keyframes breathe { 50% { transform: scale(.94); opacity: .75; } }
+
+  .meter { display: flex; gap: 5px; justify-content: center; align-items: center; height: 36px; margin-top: 18px; }
+  .meter span { width: 6px; border-radius: 3px; background: rgba(255,255,255,.35); height: 6px; transition: height .08s; }
+  .meter.user span { background: #4ade80; }
+
+  .state { text-align: center; font-size: 19px; margin-top: 6px; min-height: 26px; color: rgba(255,255,255,.85); }
+  .captions { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; padding: 18px 4px; min-height: 120px; }
+  .cap-user { font-size: 17px; color: rgba(255,255,255,.6); text-align: right; }
+  .cap-saathi { font-size: 23px; line-height: 1.4; font-weight: 500; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding-bottom: 8px; }
+  .typebox { display: none; gap: 8px; margin-bottom: 14px; }
+  .typebox.on { display: flex; }
+  .typebox input { flex: 1; min-width: 0; font-size: 18px; padding: 12px 16px; border-radius: 999px; border: 0; background: rgba(255,255,255,.14); color: #fff; }
+  .typebox input::placeholder { color: rgba(255,255,255,.5); }
+  .typebox button { padding: 0 18px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 18px; }
+  .end-wrap { padding: 8px 0 26px; }
+</style>
+</head>
+<body>
+<div class="phone">
+
+  <section class="screen on" id="splash">
+    <div class="center">
+      <div class="avatar">💛</div>
+      <h1 style="margin:0;font-size:36px">Saathi</h1>
+      <p class="muted" style="font-size:20px;margin:0">आपका रोज़ का साथी</p>
+      <button class="big-btn" id="startBtn">शुरू करें · Start</button>
+      <p class="muted" style="font-size:14px;margin:0">Allows sound &amp; microphone for calls</p>
+    </div>
+  </section>
+
+  <section class="screen" id="idle">
+    <div class="center">
+      <div class="clock" id="clock">--:--</div>
+      <div class="muted" id="date" style="font-size:20px"></div>
+      <div class="avatar" style="margin-top:24px">💛</div>
+      <p style="font-size:22px;margin:0" id="greet">नमस्ते!</p>
+      <p class="muted" style="font-size:18px;margin:0">दवाई के समय Saathi आपको फ़ोन करेगी</p>
+      <button class="soft-btn" id="callNowBtn" style="margin-top:16px">📞 Saathi को फ़ोन करें</button>
+    </div>
+  </section>
+
+  <section class="screen dark" id="ringing">
+    <div class="call-top">
+      <div class="muted" style="font-size:18px">Incoming call…</div>
+      <div class="avatar pulse" style="margin:28px auto 0">💛</div>
+      <div class="name">Saathi</div>
+      <div class="sub muted" id="ringFor">दवाई का समय</div>
+    </div>
+    <div style="flex:1"></div>
+    <div class="call-actions">
+      <div><button class="round red" id="declineBtn" aria-label="Decline">✕</button><div class="round-label">Decline</div></div>
+      <div><button class="round green pulse" id="answerBtn" aria-label="Answer">📞</button><div class="round-label">Answer</div></div>
+    </div>
+  </section>
+
+  <section class="screen dark" id="incall">
+    <div class="call-top">
+      <div class="avatar" id="callAvatar" style="margin:0 auto">💛</div>
+      <div class="name">Saathi</div>
+      <div class="sub muted" id="timer">Calling…</div>
+      <div class="meter" id="meter"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="state" id="state"></div>
+    </div>
+    <div class="captions">
+      <div class="cap-user" id="capUser"></div>
+      <div class="cap-saathi" id="capSaathi"></div>
+    </div>
+    <form class="typebox" id="typeBox">
+      <input id="textIn" placeholder="यहाँ लिखें… (type here)" autocomplete="off">
+      <button type="submit">➤</button>
+    </form>
+    <div class="grid3">
+      <div><button class="round ghost" id="muteBtn" aria-label="Mute">🎙️</button><div class="round-label" id="muteLabel">Mute</div></div>
+      <div><button class="round ghost" id="kbBtn" aria-label="Keyboard">⌨️</button><div class="round-label">Type</div></div>
+      <div><button class="round ghost" id="captionBtn" aria-label="Captions">💬</button><div class="round-label">Captions</div></div>
+    </div>
+    <div class="end-wrap"><button class="round red" id="hangupBtn" aria-label="End call">📞</button></div>
+  </section>
+
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const player = new Audio();
+let audioCtx, ringTimer, callId = null, callStart = 0, timerInt, currentRing = null;
+const declined = new Set();
+
+function show(id) { document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === id)); }
+
+// ------------------------------------------------------------------ idle
+function tick() {
+  const d = new Date();
+  $("clock").textContent = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  $("date").textContent = d.toLocaleDateString("hi-IN", { weekday: "long", day: "numeric", month: "long" });
+}
+setInterval(tick, 1000); tick();
+
+$("startBtn").onclick = async () => {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  await audioCtx.resume();
+  player.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+  player.play().catch(() => {});
+  try { await initMic(); } catch (e) { alert("Microphone permission is needed for calls."); }
+  show("idle");
+  pollRing();
+};
+
+// ------------------------------------------------------------------ ringing / tones
+function tone(freq, start, dur, gain = 0.2) {
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, audioCtx.currentTime + start);
+  g.gain.exponentialRampToValueAtTime(gain, audioCtx.currentTime + start + 0.03);
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + start + dur);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(audioCtx.currentTime + start); o.stop(audioCtx.currentTime + start + dur + 0.05);
+}
+function ringtone(on) {
+  clearInterval(ringTimer);
+  if (!on || !audioCtx) return;
+  const ring = () => { for (let i = 0; i < 6; i++) tone(i % 2 ? 640 : 800, i * 0.12, 0.11, 0.18); };
+  ring(); ringTimer = setInterval(ring, 2200);
+}
+const connectedTone = () => { tone(660, 0, 0.12, 0.15); tone(990, 0.14, 0.18, 0.15); };
+const endTone = () => { tone(480, 0, 0.2, 0.15); tone(380, 0.25, 0.3, 0.15); };
+
+async function pollRing() {
+  try {
+    const r = await (await fetch("/api/ring")).json();
+    $("greet").textContent = `नमस्ते, ${r.profile.senior_name}!`;
+    if (r.ring && !callId && !declined.has(r.ring.id) && currentRing?.id !== r.ring.id) {
+      currentRing = r.ring;
+      show("ringing"); ringtone(true);
+      if (navigator.vibrate) navigator.vibrate([400, 200, 400]);
+    }
+  } catch (e) {}
+  setTimeout(pollRing, 2000);
+}
+$("declineBtn").onclick = () => { declined.add(currentRing?.id); currentRing = null; ringtone(false); show("idle"); };
+$("answerBtn").onclick = () => { ringtone(false); startCall(); };
+$("callNowBtn").onclick = () => startCall();
+
+// ------------------------------------------------------------------ microphone + voice activity detection
+// The mic stays open for the whole call. We watch the volume, cut out each utterance
+// (with a little audio from just before speech began), and send it as 16 kHz WAV.
+const VAD = {
+  frameMs: 30,
+  startFrames: 4,       // ~120ms above threshold to count as speech
+  endSilenceMs: 1100,   // pause that ends a turn (elders pause mid-sentence; don't cut them off)
+  minSpeechMs: 350,     // ignore coughs / clicks
+  maxUtterMs: 25000,    // Sarvam REST STT accepts up to 30s
+  preRollMs: 400,
+  bargeFrames: 8,       // ~240ms of loud speech interrupts Saathi
+};
+let mic = null, mode = "off", muted = false;   // mode: off | listening | user | busy | saathi
+let noiseFloor = 0.01, loudRun = 0, quietMs = 0, speechMs = 0, utter = [], preRoll = [], frameBuf = [], frameLen = 0;
+
+async function initMic() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+  });
+  const src = audioCtx.createMediaStreamSource(stream);
+  const workletCode = `class Tap extends AudioWorkletProcessor {
+    process(inputs) { const ch = inputs[0][0]; if (ch) this.port.postMessage(ch.slice(0)); return true; } }
+    registerProcessor("tap", Tap);`;
+  await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletCode], { type: "text/javascript" })));
+  const node = new AudioWorkletNode(audioCtx, "tap");
+  const sink = audioCtx.createGain(); sink.gain.value = 0;   // keep the graph pulling without playing the mic
+  src.connect(node).connect(sink).connect(audioCtx.destination);
+  frameLen = Math.round(audioCtx.sampleRate * VAD.frameMs / 1000);
+  node.port.onmessage = (e) => onSamples(e.data);
+  mic = { stream, node };
+}
+
+function onSamples(chunk) {
+  for (const s of chunk) frameBuf.push(s);
+  while (frameBuf.length >= frameLen) onFrame(Float32Array.from(frameBuf.splice(0, frameLen)));
+}
+
+function onFrame(frame) {
+  let sum = 0; for (const s of frame) sum += s * s;
+  const rms = Math.sqrt(sum / frame.length);
+  drawMeter(rms);
+  if (mode === "off" || muted) return;
+
+  const threshold = Math.max(noiseFloor * 3, 0.012);
+
+  if (mode === "saathi") {
+    // Barge-in: the senior talks over Saathi -> stop her and listen.
+    loudRun = rms > Math.max(noiseFloor * 6, 0.05) ? loudRun + 1 : 0;
+    if (loudRun >= VAD.bargeFrames) {
+      player.pause(); player.dispatchEvent(new Event("ended"));
+      beginUtterance();
+    }
+    return;
+  }
+  if (mode === "listening") {
+    preRoll.push(frame);
+    if (preRoll.length > VAD.preRollMs / VAD.frameMs) preRoll.shift();
+    if (rms > threshold) {
+      if (++loudRun >= VAD.startFrames) beginUtterance();
+    } else {
+      loudRun = 0;
+      noiseFloor = noiseFloor * 0.95 + rms * 0.05;  // adapt to the room
+    }
+    return;
+  }
+  if (mode === "user") {
+    utter.push(frame);
+    if (rms > threshold * 0.7) { quietMs = 0; speechMs += VAD.frameMs; } else quietMs += VAD.frameMs;
+    const total = utter.length * VAD.frameMs;
+    if (quietMs >= VAD.endSilenceMs || total >= VAD.maxUtterMs) endUtterance();
+  }
+}
+
+function beginUtterance() {
+  mode = "user"; utter = [...preRoll]; preRoll = []; quietMs = 0; speechMs = loudRun * VAD.frameMs; loudRun = 0;
+  setState("🟢 आप बोल रहे हैं…", "user");
+}
+
+function endUtterance() {
+  const frames = utter; utter = [];
+  if (speechMs < VAD.minSpeechMs) { listen(); return; }
+  const wav = encodeWav(frames, audioCtx.sampleRate, 16000);
+  const f = new FormData(); f.append("audio", wav, "turn.wav");
+  sendTurn(f);
+}
+
+function listen() {
+  if (!callId) return;
+  mode = "listening"; loudRun = 0; preRoll = [];
+  setState(muted ? "🔇 Muted" : "सुन रही हूँ… बोलिए 👂", "listening");
+}
+
+function encodeWav(frames, inRate, outRate) {
+  const total = frames.reduce((n, f) => n + f.length, 0);
+  const input = new Float32Array(total);
+  let o = 0; for (const f of frames) { input.set(f, o); o += f.length; }
+  // Downsample by averaging, then write 16-bit PCM mono.
+  const ratio = inRate / outRate, outLen = Math.floor(total / ratio);
+  const pcm = new Int16Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const a = Math.floor(i * ratio), b = Math.min(total, Math.floor((i + 1) * ratio));
+    let s = 0; for (let j = a; j < b; j++) s += input[j];
+    const v = Math.max(-1, Math.min(1, s / Math.max(1, b - a)));
+    pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+  }
+  const buf = new ArrayBuffer(44 + pcm.length * 2), dv = new DataView(buf);
+  const str = (p, s) => [...s].forEach((c, i) => dv.setUint8(p + i, c.charCodeAt(0)));
+  str(0, "RIFF"); dv.setUint32(4, 36 + pcm.length * 2, true); str(8, "WAVE"); str(12, "fmt ");
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, outRate, true); dv.setUint32(28, outRate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+  str(36, "data"); dv.setUint32(40, pcm.length * 2, true);
+  new Int16Array(buf, 44).set(pcm);
+  return new Blob([buf], { type: "audio/wav" });
+}
+
+// ------------------------------------------------------------------ call UI
+const bars = [...document.querySelectorAll("#meter span")];
+function drawMeter(rms) {
+  if (mode === "off") return;
+  const level = mode === "saathi" ? 0 : Math.min(1, rms / 0.12);
+  bars.forEach((b, i) => { b.style.height = `${6 + level * 30 * (0.5 + 0.5 * Math.sin(i * 1.3 + Date.now() / 90))}px`; });
+}
+function setState(text, who) {
+  $("state").textContent = text;
+  $("meter").classList.toggle("user", who === "user");
+  $("callAvatar").classList.toggle("speaking", who === "saathi");
+  $("callAvatar").classList.toggle("thinking", who === "busy");
+}
+let showCaptions = true;
+function caption(user, saathi) {
+  if (user !== undefined) $("capUser").textContent = user ? `आप: ${user}` : "";
+  if (saathi !== undefined) $("capSaathi").textContent = saathi;
+}
+$("captionBtn").onclick = () => {
+  showCaptions = !showCaptions;
+  $("captionBtn").classList.toggle("on", !showCaptions);
+  document.querySelector(".captions").style.visibility = showCaptions ? "visible" : "hidden";
+};
+$("muteBtn").onclick = () => {
+  muted = !muted;
+  $("muteBtn").classList.toggle("on", muted);
+  $("muteBtn").textContent = muted ? "🔇" : "🎙️";
+  $("muteLabel").textContent = muted ? "Unmute" : "Mute";
+  if (mode === "listening" || mode === "user") listen();
+};
+$("kbBtn").onclick = () => { $("typeBox").classList.toggle("on"); $("kbBtn").classList.toggle("on"); $("textIn").focus(); };
+$("typeBox").onsubmit = (e) => {
+  e.preventDefault();
+  const t = $("textIn").value.trim();
+  if (!t || !callId || mode === "busy") return;
+  $("textIn").value = "";
+  player.pause();
+  const f = new FormData(); f.append("text", t);
+  sendTurn(f);
+};
+
+function playReply(b64) {
+  return new Promise(resolve => {
+    if (!b64) return resolve();
+    mode = "saathi"; loudRun = 0;
+    setState("Saathi बोल रही है… 🔊", "saathi");
+    player.onended = player.onerror = () => resolve();
+    player.src = "data:audio/wav;base64," + b64;
+    player.play().catch(resolve);
+  });
+}
+
+async function startCall() {
+  if (!mic) { try { await initMic(); } catch (e) { alert("Microphone permission is needed."); return; } }
+  show("incall"); caption("", ""); muted = false;
+  $("timer").textContent = "Connecting…";
+  mode = "busy"; setState("", "busy");
+  try {
+    const r = await (await fetch("/api/call/start", { method: "POST" })).json();
+    callId = r.call_id;
+    connectedTone();
+    callStart = Date.now();
+    timerInt = setInterval(() => {
+      const s = Math.floor((Date.now() - callStart) / 1000);
+      $("timer").textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+    }, 500);
+    caption("", r.reply);
+    await playReply(r.audio);
+    if (mode !== "user") listen();  // "user" means they interrupted and are already talking
+  } catch (e) {
+    setState("Call failed — please try again");
+    setTimeout(hangup, 1500);
+  }
+}
+
+async function sendTurn(form) {
+  mode = "busy"; setState("…", "busy");
+  try {
+    const res = await fetch(`/api/call/${callId}/turn`, { method: "POST", body: form });
+    const r = await res.json();
+    if (!callId) return;  // hung up meanwhile
+    if (!res.ok) throw new Error(r.detail || "error");
+    if (r.retry || !r.heard) { caption("", "माफ़ कीजिए, सुनाई नहीं दिया। फिर से बोलिए 🙏"); return listen(); }
+    caption(r.heard, r.reply);
+    await playReply(r.audio);
+    if (mode === "user") return;  // interrupted: their new utterance is being captured
+    if (r.end_call) return hangup();
+  } catch (e) {
+    console.error(e);
+    caption(undefined, "⚠️ नेटवर्क की दिक्कत — फिर से बोलिए");
+  }
+  if (callId) listen();
+}
+
+async function hangup() {
+  const id = callId;
+  callId = null; mode = "off"; currentRing = null;
+  player.pause(); clearInterval(timerInt);
+  endTone();
+  setState("Call ended"); $("timer").textContent = "Call ended";
+  bars.forEach(b => b.style.height = "6px");
+  if (id) fetch(`/api/call/${id}/end`, { method: "POST" });
+  setTimeout(() => show("idle"), 1400);
+}
+$("hangupBtn").onclick = hangup;
+</script>
+</body>
+</html>

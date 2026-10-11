@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saathi Demo</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  body { height: 100vh; display: flex; flex-direction: column; }
+  .bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  .bar h1 { margin: 0; font-size: 18px; }
+  .bar a { color: var(--accent); font-size: 14px; }
+  .split { flex: 1; display: flex; gap: 16px; padding: 16px; min-height: 0; }
+  .phone { width: 400px; flex-shrink: 0; border: 10px solid #1d1712; border-radius: 40px; overflow: hidden; background: var(--bg); }
+  .dash { flex: 1; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+  iframe { width: 100%; height: 100%; border: 0; }
+  .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin: 0 0 6px 4px; }
+  .col { display: flex; flex-direction: column; min-height: 0; }
+  @media (max-width: 900px) { .split { flex-direction: column; } .phone { width: 100%; height: 720px; } .dash { height: 900px; } }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <h1>💛 Saathi: a daily companion for elders, in their own language</h1>
+    <span style="flex:1"></span>
+    <a href="/senior" target="_blank">Senior app ↗</a>
+    <a href="/family" target="_blank">Family dashboard ↗</a>
+  </div>
+  <div class="split">
+    <div class="col"><div class="label">Senior's phone</div><div class="phone" style="flex:1"><iframe src="/senior" allow="microphone; autoplay"></iframe></div></div>
+    <div class="col" style="flex:1"><div class="label">Family dashboard</div><div class="dash" style="flex:1"><iframe src="/family"></iframe></div></div>
+  </div>
+</body>
+</html>

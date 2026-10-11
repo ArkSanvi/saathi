@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saathi Family</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  body { padding: 20px 16px 40px; }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; }
+  header h1 { margin: 0; font-size: 24px; }
+  header .who { flex: 1; color: var(--muted); }
+  .btn { padding: 10px 16px; border-radius: 12px; background: var(--surface-2); color: var(--text); font-weight: 600; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.small { padding: 6px 10px; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: 1fr 1.25fr; gap: 16px; align-items: start; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); margin-bottom: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  .card h2 .count { margin-left: auto; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px; text-align: center; }
+  .stat b { display: block; font-size: 28px; }
+  .stat span { font-size: 13px; color: var(--muted); }
+
+  .alert { border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; border-left: 5px solid; }
+  .alert.red { background: var(--red-soft); border-color: var(--red); }
+  .alert.yellow { background: var(--yellow-soft); border-color: var(--yellow); }
+  .alert.ack { opacity: .5; }
+  .alert .msg { font-weight: 600; }
+  .alert .quote { font-size: 14px; margin-top: 4px; font-style: italic; }
+  .alert .foot { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .flash { animation: flash 1.2s 3; }
+  @keyframes flash { 50% { transform: scale(1.02); box-shadow: 0 0 0 4px var(--red-soft); } }
+
+  .dose { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+  .dose:last-child { border-bottom: 0; }
+  .dose .t { width: 52px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .dose .n { flex: 1; }
+  .dose .r { font-size: 13px; color: var(--muted); }
+
+  .upload { border: 2px dashed var(--border); border-radius: 14px; padding: 16px; text-align: center; cursor: pointer; }
+  .upload:hover { border-color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 12px; }
+  th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 4px; }
+  td { padding: 4px; }
+  td input { width: 100%; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); }
+  .slots label { font-size: 12px; white-space: nowrap; margin-right: 6px; }
+
+  .call { border: 1px solid var(--border); border-radius: 14px; padding: 12px; margin-bottom: 10px; }
+  .call .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
+  .call .sum { margin: 8px 0 0; }
+  .live { background: var(--red); color: #fff; }
+  details summary { cursor: pointer; font-size: 13px; color: var(--accent); margin-top: 8px; }
+  .turn { padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 14px; }
+  .turn .who { font-weight: 700; font-size: 12px; text-transform: uppercase; color: var(--muted); }
+  .turn .en { color: var(--muted); font-size: 13px; }
+  .settings { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .settings input, .settings select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); }
+  .empty { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>💛 Saathi</h1>
+    <div class="who" id="who"></div>
+    <button class="btn primary" id="triggerBtn">📞 Trigger check-in</button>
+    <button class="btn" id="resetBtn" title="Reset demo data">↺</button>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><b id="sTaken">0</b><span>doses taken</span></div>
+    <div class="stat"><b id="sMissed">0</b><span>missed</span></div>
+    <div class="stat"><b id="sAlerts">0</b><span>open alerts</span></div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="card"><h2>🚨 Alerts <span class="count muted" id="alertCount"></span></h2><div id="alerts"></div></div>
+      <div class="card"><h2>💊 Today's doses</h2><div id="doses"></div></div>
+      <div class="card">
+        <h2>⚙️ Profile</h2>
+        <form class="settings" id="profileForm">
+          <label>Senior's name<input name="senior_name"></label>
+          <label>Your name<input name="family_name"></label>
+          <label>Relation<input name="relation"></label>
+          <label>Starting language
+            <select name="language">
+              <option value="hi-IN">Hindi</option><option value="ta-IN">Tamil</option><option value="te-IN">Telugu</option>
+              <option value="kn-IN">Kannada</option><option value="ml-IN">Malayalam</option><option value="mr-IN">Marathi</option>
+              <option value="bn-IN">Bengali</option><option value="gu-IN">Gujarati</option><option value="pa-IN">Punjabi</option>
+              <option value="od-IN">Odia</option><option value="en-IN">English</option>
+            </select>
+          </label>
+          <button class="btn" style="grid-column: span 2">Save profile</button>
+        </form>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>📄 Prescription <span class="count muted" id="rxInfo"></span></h2>
+        <label class="upload" id="uploadBox">
+          <input type="file" id="rxFile" accept="image/jpeg,image/png,application/pdf" hidden>
+          <div id="uploadMsg">📷 Upload a photo of the prescription — <b>Sarvam Vision</b> reads it</div>
+        </label>
+        <table>
+          <thead><tr><th>Medicine</th><th>Dose</th><th>For</th><th>When</th><th></th></tr></thead>
+          <tbody id="meds"></tbody>
+        </table>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn small" id="addMed">+ Add</button>
+          <button class="btn small primary" id="saveMeds" style="margin-left:auto">Save schedule</button>
+        </div>
+      </div>
+      <div class="card"><h2>📞 Check-in calls</h2><div id="calls"></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const LANG = { "hi-IN": "Hindi", "ta-IN": "Tamil", "te-IN": "Telugu", "kn-IN": "Kannada", "ml-IN": "Malayalam", "mr-IN": "Marathi",
+  "bn-IN": "Bengali", "gu-IN": "Gujarati", "pa-IN": "Punjabi", "od-IN": "Odia", "en-IN": "English", "as-IN": "Assamese", "ur-IN": "Urdu" };
+const SLOTS = [["08:00", "Morning"], ["14:00", "Afternoon"], ["20:00", "Night"]];
+const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : "";
+const to12 = (t) => { const [h, m] = t.split(":").map(Number); return `${(h % 12) || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
+
+let medsDirty = false, profileLoaded = false, seenAlerts = null;
+
+function render(s) {
+  const p = s.profile;
+  $("who").textContent = `Caring for ${p.senior_name} · ${p.family_name} (${p.relation})`;
+  if (!profileLoaded) {
+    for (const [k, v] of Object.entries(p)) { const el = $("profileForm").elements[k]; if (el) el.value = v; }
+    profileLoaded = true;
+  }
+
+  const taken = s.doses.filter(d => d.status === "taken").length;
+  const missed = s.doses.filter(d => d.status === "missed").length;
+  const open = s.alerts.filter(a => !a.ack);
+  $("sTaken").textContent = `${taken}/${s.doses.length}`;
+  $("sMissed").textContent = missed;
+  $("sAlerts").textContent = open.length;
+  $("alertCount").textContent = open.length ? `${open.length} open` : "";
+
+  // alerts (flash new ones)
+  const ids = new Set(s.alerts.map(a => a.id));
+  $("alerts").innerHTML = s.alerts.length ? s.alerts.map(a => `
+    <div class="alert ${a.level} ${a.ack ? "ack" : ""} ${seenAlerts && !seenAlerts.has(a.id) ? "flash" : ""}">
+      <div class="msg">${a.level === "red" ? "🔴" : "🟡"} ${esc(a.message)}</div>
+      ${a.quote ? `<div class="quote">“${esc(a.quote)}”</div>` : ""}
+      <div class="foot"><span>${fmtTime(a.ts)}</span>${a.ack ? "Seen" : `<button class="btn small" onclick="ack('${a.id}')">Mark seen</button>`}</div>
+    </div>`).join("") : `<div class="empty">No alerts. All good 🌿</div>`;
+  seenAlerts = ids;
+
+  $("doses").innerHTML = s.doses.length ? s.doses.map(d => `
+    <div class="dose">
+      <div class="t">${to12(d.time).replace(" ", "<br><small>")}</small></div>
+      <div class="n">${esc(d.name)} <span class="muted">${esc(d.strength)}</span>
+        ${d.reason ? `<div class="r">${esc(d.reason)}</div>` : ""}</div>
+      <span class="pill ${d.status}">${d.status}</span>
+    </div>`).join("") : `<div class="empty">No medicines yet — upload a prescription.</div>`;
+
+  if (!medsDirty) renderMeds(s.medicines);
+  if (s.prescription) $("rxInfo").textContent = [s.prescription.doctor && `Dr: ${s.prescription.doctor}`, `read ${fmtTime(s.prescription.at)}`].filter(Boolean).join(" · ");
+
+  $("calls").innerHTML = s.calls.length ? s.calls.map(c => `
+    <div class="call">
+      <div class="head">
+        ${c.status === "live" ? `<span class="pill live">● LIVE</span>` : ""}
+        <b>${fmtTime(c.started)}</b>
+        ${[...new Set(c.turns.map(t => t.lang))].map(l => `<span class="pill lang">${esc(LANG[l] || l)}</span>`).join("")}
+        ${c.mood ? `<span class="muted">Mood: ${esc(c.mood)}</span>` : ""}
+      </div>
+      ${c.summary ? `<p class="sum">${esc(c.summary)}</p>` : c.status === "live" ? `<p class="sum muted">Call in progress…</p>` : ""}
+      <details ${c.status === "live" ? "open" : ""}><summary>Transcript (${c.turns.length} turns)</summary>
+        ${c.turns.map(t => `<div class="turn"><div class="who">${t.role === "saathi" ? "Saathi" : esc(p.senior_name)} ${t.via === "voice" ? "🎤" : ""}</div>
+          <div>${esc(t.text)}</div>${t.en && t.en !== t.text ? `<div class="en">${esc(t.en)}</div>` : ""}</div>`).join("")}
+      </details>
+    </div>`).join("") : `<div class="empty">No calls yet. Press “Trigger check-in”.</div>`;
+}
+
+function renderMeds(meds) {
+  $("meds").innerHTML = meds.map(m => `
+    <tr data-id="${esc(m.id)}" data-food="${esc(m.food)}">
+      <td><input name="name" value="${esc(m.name)}"></td>
+      <td><input name="strength" value="${esc(m.strength)}"></td>
+      <td><input name="purpose" value="${esc(m.purpose)}" placeholder="e.g. BP"></td>
+      <td class="slots">${SLOTS.map(([t, l]) => `<label><input type="checkbox" value="${t}" ${m.times.includes(t) ? "checked" : ""} style="width:auto"> ${l}</label>`).join("")}</td>
+      <td><button class="btn small" onclick="this.closest('tr').remove(); medsDirty = true">✕</button></td>
+    </tr>`).join("");
+}
+$("meds").addEventListener("input", () => medsDirty = true);
+$("addMed").onclick = () => {
+  medsDirty = true;
+  const rows = readMeds();
+  rows.push({ id: null, name: "", strength: "", purpose: "", times: ["08:00"] });
+  renderMeds(rows);
+};
+function readMeds() {
+  return [...$("meds").querySelectorAll("tr")].map(tr => ({
+    id: tr.dataset.id && tr.dataset.id !== "null" && !tr.dataset.id.startsWith("rx") ? tr.dataset.id : null,
+    name: tr.querySelector("[name=name]").value.trim(),
+    strength: tr.querySelector("[name=strength]").value.trim(),
+    purpose: tr.querySelector("[name=purpose]").value.trim(),
+    times: [...tr.querySelectorAll("input[type=checkbox]:checked")].map(c => c.value),
+    food: tr.dataset.food || "",
+  }));
+}
+$("saveMeds").onclick = async () => {
+  const meds = readMeds().filter(m => m.name && m.times.length);
+  await fetch("/api/medicines", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(meds) });
+  medsDirty = false; refresh();
+};
+
+$("rxFile").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  $("uploadMsg").innerHTML = "⏳ Sarvam Vision is reading the prescription…";
+  const f = new FormData(); f.append("file", file);
+  try {
+    const res = await fetch("/api/prescription", { method: "POST", body: f });
+    const r = await res.json();
+    if (!res.ok) throw new Error(r.detail);
+    if (!r.medicines.length) throw new Error("No medicines found — try a clearer photo");
+    medsDirty = true;
+    renderMeds(r.medicines);
+    $("uploadMsg").innerHTML = `✅ Found <b>${r.medicines.length}</b> medicines${r.doctor ? ` from ${esc(r.doctor)}` : ""}. Check them and press <b>Save schedule</b>.`;
+  } catch (err) {
+    $("uploadMsg").textContent = "⚠️ " + err.message;
+  }
+  e.target.value = "";
+};
+
+$("profileForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target));
+  await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  refresh();
+};
+
+async function ack(id) { await fetch(`/api/ack/${id}`, { method: "POST" }); refresh(); }
+$("triggerBtn").onclick = async () => {
+  $("triggerBtn").textContent = "📞 Ringing…";
+  await fetch("/api/trigger-call", { method: "POST" });
+  setTimeout(() => $("triggerBtn").textContent = "📞 Trigger check-in", 2500);
+};
+$("resetBtn").onclick = async () => {
+  if (!confirm("Reset all demo data?")) return;
+  await fetch("/api/reset", { method: "POST" });
+  medsDirty = false; profileLoaded = false; seenAlerts = null; refresh();
+};
+
+async function refresh() {
+  try { render(await (await fetch("/api/state")).json()); } catch (e) {}
+}
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>
