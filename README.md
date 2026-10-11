@@ -53,7 +53,7 @@ Each turn takes about 4–5 seconds end to end.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-echo "SARVAM_API_KEY=your_key_here" > .env
+cp .env.example .env   # then add your Sarvam API key
 .venv/bin/uvicorn main:app --port 8000
 ```
 
